@@ -1,4 +1,5 @@
 print("🔥 MKV CONVERTER V2 - TELETHON BUILD")
+
 import os
 import asyncio
 import subprocess
@@ -31,12 +32,17 @@ os.makedirs(WORK_DIR, exist_ok=True)
 class HealthHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
+
         if self.path == "/health":
+
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
+
             self.wfile.write(b"OK")
+
         else:
+
             self.send_response(404)
             self.end_headers()
 
@@ -45,7 +51,12 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 
 def start_health_server():
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+
+    server = HTTPServer(
+        ("0.0.0.0", PORT),
+        HealthHandler
+    )
+
     server.serve_forever()
 
 
@@ -61,6 +72,21 @@ client = TelegramClient(
 
 
 # =========================
+# START COMMAND
+# =========================
+
+@client.on(events.NewMessage(pattern=r"^/start$"))
+async def start_handler(event):
+
+    await event.respond(
+        "🤖 MKV Converter Bot is online!\n\n"
+        "Send me an MKV file and I will convert it to MP4.\n\n"
+        "⚡ Stream-copy conversion is used when possible.\n"
+        "🔄 H.264/AAC re-encoding is used when required."
+    )
+
+
+# =========================
 # HELPERS
 # =========================
 
@@ -71,6 +97,7 @@ def format_size(size):
     size = float(size)
 
     for unit in units:
+
         if size < 1024:
             return f"{size:.2f} {unit}"
 
@@ -111,6 +138,10 @@ def cleanup(*files):
             pass
 
 
+# =========================
+# FFMPEG CONVERSION
+# =========================
+
 def convert_mkv_to_mp4(input_file, output_file):
 
     """
@@ -122,6 +153,7 @@ def convert_mkv_to_mp4(input_file, output_file):
     """
 
     command_copy = [
+
         "ffmpeg",
         "-y",
         "-hide_banner",
@@ -147,20 +179,25 @@ def convert_mkv_to_mp4(input_file, output_file):
     ]
 
     result = subprocess.run(
+
         command_copy,
+
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
 
     if result.returncode == 0:
+
         return "stream-copy"
+
 
     # =========================
     # FALLBACK RE-ENCODE
     # =========================
 
     command_encode = [
+
         "ffmpeg",
         "-y",
         "-hide_banner",
@@ -198,7 +235,9 @@ def convert_mkv_to_mp4(input_file, output_file):
     ]
 
     result = subprocess.run(
+
         command_encode,
+
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -220,9 +259,11 @@ def convert_mkv_to_mp4(input_file, output_file):
 async def update_progress(message, text):
 
     try:
+
         await message.edit(text)
 
     except Exception:
+
         pass
 
 
@@ -257,14 +298,24 @@ async def download_progress(
     eta = remaining / speed if speed > 0 else 0
 
     text = (
+
         "📥 Downloading MKV\n\n"
+
         f"Progress: {percent:.1f}%\n"
-        f"Downloaded: {format_size(received)} / {format_size(total)}\n"
+
+        f"Downloaded: "
+        f"{format_size(received)} / "
+        f"{format_size(total)}\n"
+
         f"Speed: {format_size(speed)}/s\n"
+
         f"ETA: {format_time(eta)}"
     )
 
-    await update_progress(message, text)
+    await update_progress(
+        message,
+        text
+    )
 
 
 async def upload_progress(
@@ -298,14 +349,24 @@ async def upload_progress(
     eta = remaining / speed if speed > 0 else 0
 
     text = (
+
         "📤 Uploading MP4\n\n"
+
         f"Progress: {percent:.1f}%\n"
-        f"Uploaded: {format_size(sent)} / {format_size(total)}\n"
+
+        f"Uploaded: "
+        f"{format_size(sent)} / "
+        f"{format_size(total)}\n"
+
         f"Speed: {format_size(speed)}/s\n"
+
         f"ETA: {format_time(eta)}"
     )
 
-    await update_progress(message, text)
+    await update_progress(
+        message,
+        text
+    )
 
 
 # =========================
@@ -317,15 +378,17 @@ async def handle_message(event):
 
     message = event.message
 
+    # Ignore messages without files
     if not message.file:
         return
 
     filename = message.file.name or ""
 
+    # Only process MKV
     if not filename.lower().endswith(".mkv"):
         return
 
-    # Ignore messages that don't have document/video media
+    # Ignore messages without media
     if not message.media:
         return
 
@@ -353,28 +416,41 @@ async def handle_message(event):
         # =========================
 
         download_state = {
+
             "start": time.time(),
+
             "last_update": 0,
         }
 
         await message.download_media(
+
             file=input_file,
+
             progress_callback=lambda received, total:
+
                 asyncio.create_task(
+
                     download_progress(
+
                         received,
+
                         total,
+
                         download_state,
+
                         status,
                     )
                 ),
         )
 
         await update_progress(
+
             status,
+
             "🔍 MKV downloaded.\n\n"
             "Checking the fastest conversion method..."
         )
+
 
         # =========================
         # CONVERT
@@ -383,88 +459,147 @@ async def handle_message(event):
         conversion_start = time.time()
 
         method = await asyncio.to_thread(
+
             convert_mkv_to_mp4,
+
             input_file,
+
             output_file,
         )
 
-        conversion_time = time.time() - conversion_start
+        conversion_time = (
+            time.time() - conversion_start
+        )
 
-        output_size = os.path.getsize(output_file)
+        output_size = os.path.getsize(
+            output_file
+        )
+
 
         if method == "stream-copy":
 
             conversion_text = (
+
                 "⚡ Stream-copy conversion completed!\n\n"
+
                 "No video re-encoding was required."
             )
 
         else:
 
             conversion_text = (
+
                 "🔄 Re-encoding was required.\n\n"
+
                 "The MP4 was created using H.264/AAC."
             )
 
+
         await update_progress(
+
             status,
+
             conversion_text
-            + f"\n\n⏱ Conversion: {format_time(conversion_time)}"
-            + f"\n📦 Output: {format_size(output_size)}"
+
+            + f"\n\n⏱ Conversion: "
+              f"{format_time(conversion_time)}"
+
+            + f"\n📦 Output: "
+              f"{format_size(output_size)}"
+
             + "\n\n📤 Preparing upload..."
         )
+
 
         # =========================
         # UPLOAD
         # =========================
 
         upload_state = {
+
             "start": time.time(),
+
             "last_update": 0,
         }
 
         await client.send_file(
+
             event.chat_id,
+
             output_file,
+
             caption=(
+
                 "✅ Conversion complete\n\n"
+
                 f"Method: {method}\n"
+
                 f"Output: {format_size(output_size)}\n"
-                f"Conversion time: {format_time(conversion_time)}"
+
+                f"Conversion time: "
+                f"{format_time(conversion_time)}"
             ),
+
             force_document=True,
+
             progress_callback=lambda sent, total:
+
                 asyncio.create_task(
+
                     upload_progress(
+
                         sent,
+
                         total,
+
                         upload_state,
+
                         status,
                     )
                 ),
         )
 
-        total_time = time.time() - start_time
+
+        # =========================
+        # FINISHED
+        # =========================
+
+        total_time = (
+            time.time() - start_time
+        )
 
         await status.edit(
+
             "✅ Finished!\n\n"
+
             f"⚡ Method: {method}\n"
-            f"📦 Output: {format_size(output_size)}\n"
-            f"⏱ Total time: {format_time(total_time)}"
+
+            f"📦 Output: "
+            f"{format_size(output_size)}\n"
+
+            f"⏱ Total time: "
+            f"{format_time(total_time)}"
         )
+
 
     except Exception as e:
 
         await update_progress(
+
             status,
+
             "❌ Conversion failed.\n\n"
+
             f"{str(e)[:3500]}"
         )
+
 
     finally:
 
         cleanup(
+
             input_file,
+
             output_file,
         )
 
@@ -475,7 +610,9 @@ async def handle_message(event):
 
 async def main():
 
-    print("Starting Telegram converter...")
+    print(
+        "Starting Telegram converter..."
+    )
 
     await client.start(
         bot_token=BOT_TOKEN
@@ -494,10 +631,16 @@ async def main():
     await client.run_until_disconnected()
 
 
+# =========================
+# RUN
+# =========================
+
 if __name__ == "__main__":
 
     health_thread = threading.Thread(
+
         target=start_health_server,
+
         daemon=True,
     )
 
