@@ -1,6 +1,7 @@
-print("🔥 MKV CONVERTER V2 - TELETHON BUILD")
+print("🔥 MKV CONVERTER V3 - TELUGU AUDIO ONLY")
 
 import os
+import json
 import asyncio
 import subprocess
 import threading
@@ -81,6 +82,7 @@ async def start_handler(event):
     await event.respond(
         "🤖 MKV Converter Bot is online!\n\n"
         "Send me an MKV file and I will convert it to MP4.\n\n"
+        "🎵 Telugu audio only\n"
         "⚡ Stream-copy conversion is used when possible.\n"
         "🔄 H.264/AAC re-encoding is used when required."
     )
@@ -139,53 +141,277 @@ def cleanup(*files):
 
 
 # =========================
+# FIND TELUGU AUDIO
+# =========================
+
+def find_telugu_audio(input_file):
+
+    """
+    Inspect the MKV audio streams using ffprobe.
+
+    Telugu can be identified through:
+    - language metadata: tel
+    - language metadata: te
+    - language metadata: telugu
+    - title containing Telugu
+    - Telugu written in Telugu script
+    """
+
+    command = [
+
+        "ffprobe",
+        "-v",
+        "error",
+
+        "-select_streams",
+        "a",
+
+        "-show_entries",
+        "stream=index:stream_tags=language,title",
+
+        "-of",
+        "json",
+
+        input_file,
+    ]
+
+    result = subprocess.run(
+
+        command,
+
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+
+        text=True,
+    )
+
+    if result.returncode != 0:
+
+        raise RuntimeError(
+            "Unable to inspect audio tracks.\n\n"
+            + result.stderr[-2000:]
+        )
+
+    try:
+
+        data = json.loads(result.stdout)
+
+    except json.JSONDecodeError:
+
+        raise RuntimeError(
+            "Unable to read audio track information."
+        )
+
+    streams = data.get("streams", [])
+
+    if not streams:
+        return None, []
+
+
+    audio_info = []
+
+
+    for stream in streams:
+
+        index = stream.get("index")
+
+        tags = stream.get("tags") or {}
+
+        language = (
+            tags.get("language")
+            or ""
+        ).strip().lower()
+
+        title = (
+            tags.get("title")
+            or ""
+        ).strip().lower()
+
+
+        audio_info.append({
+
+            "index": index,
+
+            "language": language,
+
+            "title": title,
+        })
+
+
+    # =========================
+    # SEARCH FOR TELUGU
+    # =========================
+
+    for audio in audio_info:
+
+        language = audio["language"]
+        title = audio["title"]
+
+
+        # Exact/common language codes
+        language_match = (
+
+            language == "tel"
+            or language == "te"
+            or language == "telugu"
+            or language.startswith("tel-")
+            or language.startswith("te-")
+        )
+
+
+        # Track title
+        title_match = (
+
+            "telugu" in title
+            or "తెలుగు" in title
+        )
+
+
+        if language_match or title_match:
+
+            return audio["index"], audio_info
+
+
+    return None, audio_info
+
+
+# =========================
+# FORMAT AUDIO INFORMATION
+# =========================
+
+def format_audio_tracks(audio_tracks):
+
+    if not audio_tracks:
+        return "No audio tracks found."
+
+    lines = []
+
+    for number, audio in enumerate(audio_tracks, start=1):
+
+        language = audio["language"] or "unknown"
+        title = audio["title"] or "untitled"
+
+        lines.append(
+            f"Audio {number}: "
+            f"stream {audio['index']} | "
+            f"language={language} | "
+            f"title={title}"
+        )
+
+    return "\n".join(lines)
+
+
+# =========================
 # FFMPEG CONVERSION
 # =========================
 
 def convert_mkv_to_mp4(input_file, output_file):
 
     """
-    First attempt:
-    stream copy = extremely fast.
+    Convert MKV to MP4 while keeping ONLY Telugu audio.
 
-    If MP4 container cannot accept the streams,
-    fall back to H.264/AAC encoding.
+    First attempt:
+        Video  -> stream copy
+        Telugu -> stream copy
+
+    This is the fastest method.
+
+    If MP4 cannot accept the original Telugu audio codec:
+
+        Video  -> H.264
+        Telugu -> AAC
+
+    Other audio tracks are never included.
     """
+
+
+    # =========================
+    # FIND TELUGU AUDIO
+    # =========================
+
+    telugu_audio_index, audio_tracks = find_telugu_audio(
+        input_file
+    )
+
+
+    if telugu_audio_index is None:
+
+        details = format_audio_tracks(
+            audio_tracks
+        )
+
+        raise RuntimeError(
+
+            "🇮🇳 Telugu audio track was not detected.\n\n"
+
+            "Available audio tracks:\n"
+
+            + details
+
+            + "\n\n"
+            "The bot did NOT select another language."
+        )
+
+
+    # =========================
+    # STREAM COPY
+    # =========================
 
     command_copy = [
 
         "ffmpeg",
+
         "-y",
+
         "-hide_banner",
+
         "-loglevel",
         "error",
 
         "-i",
         input_file,
 
+
+        # Video
         "-map",
         "0:v:0",
 
-        "-map",
-        "0:a?",
 
+        # ONLY Telugu audio
+        "-map",
+        f"0:{telugu_audio_index}",
+
+
+        # No re-encoding
         "-c",
         "copy",
 
+
+        # Make Telugu the default audio
+        "-disposition:a:0",
+        "default",
+
+
+        # MP4 optimization
         "-movflags",
         "+faststart",
 
+
         output_file,
     ]
+
 
     result = subprocess.run(
 
         command_copy,
 
         stdout=subprocess.PIPE,
+
         stderr=subprocess.PIPE,
+
         text=True,
     )
+
 
     if result.returncode == 0:
 
@@ -196,23 +422,36 @@ def convert_mkv_to_mp4(input_file, output_file):
     # FALLBACK RE-ENCODE
     # =========================
 
+    # Delete potentially incomplete output
+    cleanup(output_file)
+
+
     command_encode = [
 
         "ffmpeg",
+
         "-y",
+
         "-hide_banner",
+
         "-loglevel",
         "error",
 
         "-i",
         input_file,
 
+
+        # Video
         "-map",
         "0:v:0",
 
-        "-map",
-        "0:a?",
 
+        # ONLY Telugu audio
+        "-map",
+        f"0:{telugu_audio_index}",
+
+
+        # Video encoding
         "-c:v",
         "libx264",
 
@@ -222,32 +461,47 @@ def convert_mkv_to_mp4(input_file, output_file):
         "-crf",
         "23",
 
+
+        # Telugu audio encoding
         "-c:a",
         "aac",
 
         "-b:a",
         "192k",
 
+
+        # Make Telugu default
+        "-disposition:a:0",
+        "default",
+
+
+        # MP4 optimization
         "-movflags",
         "+faststart",
 
+
         output_file,
     ]
+
 
     result = subprocess.run(
 
         command_encode,
 
         stdout=subprocess.PIPE,
+
         stderr=subprocess.PIPE,
+
         text=True,
     )
+
 
     if result.returncode != 0:
 
         raise RuntimeError(
             result.stderr[-3000:]
         )
+
 
     return "re-encode"
 
@@ -295,7 +549,11 @@ async def download_progress(
 
     remaining = total - received
 
-    eta = remaining / speed if speed > 0 else 0
+    eta = (
+        remaining / speed
+        if speed > 0
+        else 0
+    )
 
     text = (
 
@@ -307,9 +565,11 @@ async def download_progress(
         f"{format_size(received)} / "
         f"{format_size(total)}\n"
 
-        f"Speed: {format_size(speed)}/s\n"
+        f"Speed: "
+        f"{format_size(speed)}/s\n"
 
-        f"ETA: {format_time(eta)}"
+        f"ETA: "
+        f"{format_time(eta)}"
     )
 
     await update_progress(
@@ -346,7 +606,11 @@ async def upload_progress(
 
     remaining = total - sent
 
-    eta = remaining / speed if speed > 0 else 0
+    eta = (
+        remaining / speed
+        if speed > 0
+        else 0
+    )
 
     text = (
 
@@ -358,9 +622,11 @@ async def upload_progress(
         f"{format_size(sent)} / "
         f"{format_size(total)}\n"
 
-        f"Speed: {format_size(speed)}/s\n"
+        f"Speed: "
+        f"{format_size(speed)}/s\n"
 
-        f"ETA: {format_time(eta)}"
+        f"ETA: "
+        f"{format_time(eta)}"
     )
 
     await update_progress(
@@ -378,36 +644,60 @@ async def handle_message(event):
 
     message = event.message
 
-    # Ignore messages without files
+
+    # =========================
+    # IGNORE NON-FILES
+    # =========================
+
     if not message.file:
         return
 
+
     filename = message.file.name or ""
 
-    # Only process MKV
+
+    # =========================
+    # ONLY MKV
+    # =========================
+
     if not filename.lower().endswith(".mkv"):
         return
 
-    # Ignore messages without media
+
+    # =========================
+    # CHECK MEDIA
+    # =========================
+
     if not message.media:
         return
 
+
     input_file = os.path.join(
+
         WORK_DIR,
+
         f"input_{message.id}.mkv"
     )
 
+
     output_file = os.path.join(
+
         WORK_DIR,
+
         f"output_{message.id}.mp4"
     )
 
+
     status = await event.reply(
-        "📥 MKV detected.\n"
+
+        "📥 MKV detected.\n\n"
+
         "Preparing download..."
     )
 
+
     start_time = time.time()
+
 
     try:
 
@@ -422,33 +712,38 @@ async def handle_message(event):
             "last_update": 0,
         }
 
+
         await message.download_media(
 
             file=input_file,
 
-            progress_callback=lambda received, total:
+            progress_callback=
 
-                asyncio.create_task(
+                lambda received, total:
 
-                    download_progress(
+                    asyncio.create_task(
 
-                        received,
+                        download_progress(
 
-                        total,
+                            received,
 
-                        download_state,
+                            total,
 
-                        status,
-                    )
-                ),
+                            download_state,
+
+                            status,
+                        )
+                    ),
         )
+
 
         await update_progress(
 
             status,
 
             "🔍 MKV downloaded.\n\n"
-            "Checking the fastest conversion method..."
+
+            "🎵 Detecting Telugu audio track..."
         )
 
 
@@ -457,6 +752,7 @@ async def handle_message(event):
         # =========================
 
         conversion_start = time.time()
+
 
         method = await asyncio.to_thread(
 
@@ -467,14 +763,23 @@ async def handle_message(event):
             output_file,
         )
 
+
         conversion_time = (
-            time.time() - conversion_start
+
+            time.time()
+            - conversion_start
         )
 
+
         output_size = os.path.getsize(
+
             output_file
         )
 
+
+        # =========================
+        # CONVERSION MESSAGE
+        # =========================
 
         if method == "stream-copy":
 
@@ -482,7 +787,9 @@ async def handle_message(event):
 
                 "⚡ Stream-copy conversion completed!\n\n"
 
-                "No video re-encoding was required."
+                "🎵 Telugu audio only\n"
+
+                "🎬 Video was not re-encoded."
             )
 
         else:
@@ -491,7 +798,11 @@ async def handle_message(event):
 
                 "🔄 Re-encoding was required.\n\n"
 
-                "The MP4 was created using H.264/AAC."
+                "🎵 Telugu audio only\n"
+
+                "🎬 Video: H.264\n"
+
+                "🎵 Audio: AAC"
             )
 
 
@@ -522,41 +833,50 @@ async def handle_message(event):
             "last_update": 0,
         }
 
+
         await client.send_file(
 
             event.chat_id,
 
             output_file,
 
+
             caption=(
 
                 "✅ Conversion complete\n\n"
 
-                f"Method: {method}\n"
+                f"🎵 Audio: Telugu only\n"
 
-                f"Output: {format_size(output_size)}\n"
+                f"⚡ Method: {method}\n"
 
-                f"Conversion time: "
+                f"📦 Output: "
+                f"{format_size(output_size)}\n"
+
+                f"⏱ Conversion time: "
                 f"{format_time(conversion_time)}"
             ),
 
+
             force_document=True,
 
-            progress_callback=lambda sent, total:
 
-                asyncio.create_task(
+            progress_callback=
 
-                    upload_progress(
+                lambda sent, total:
 
-                        sent,
+                    asyncio.create_task(
 
-                        total,
+                        upload_progress(
 
-                        upload_state,
+                            sent,
 
-                        status,
-                    )
-                ),
+                            total,
+
+                            upload_state,
+
+                            status,
+                        )
+                    ),
         )
 
 
@@ -565,12 +885,17 @@ async def handle_message(event):
         # =========================
 
         total_time = (
-            time.time() - start_time
+
+            time.time()
+            - start_time
         )
+
 
         await status.edit(
 
             "✅ Finished!\n\n"
+
+            "🎵 Telugu audio only\n"
 
             f"⚡ Method: {method}\n"
 
@@ -600,7 +925,7 @@ async def handle_message(event):
 
             input_file,
 
-            output_file,
+            output_file
         )
 
 
@@ -614,19 +939,25 @@ async def main():
         "Starting Telegram converter..."
     )
 
+
     await client.start(
+
         bot_token=BOT_TOKEN
     )
 
+
     me = await client.get_me()
+
 
     print(
         f"Bot connected: @{me.username}"
     )
 
+
     print(
         f"Health server running on port {PORT}"
     )
+
 
     await client.run_until_disconnected()
 
@@ -641,9 +972,11 @@ if __name__ == "__main__":
 
         target=start_health_server,
 
-        daemon=True,
+        daemon=True
     )
 
+
     health_thread.start()
+
 
     asyncio.run(main())
