@@ -70,7 +70,7 @@ TITLE_BOLD_TELUGU_FONT_PATH = os.environ.get(
     "TITLE_BOLD_TELUGU_FONT_PATH",
     "/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf",
 )
-TITLE_FONT_SIZE = max(20, int(os.environ.get("TITLE_FONT_SIZE", "34")))
+TITLE_FONT_SIZE = max(20, int(os.environ.get("TITLE_FONT_SIZE", "52")))
 TITLE_TEXT_MAX_WIDTH = max(200, int(os.environ.get("TITLE_TEXT_MAX_WIDTH", "640")))
 TITLE_TOP_GAP = max(0, int(os.environ.get("TITLE_TOP_GAP", "12")))
 TITLE_LINE_SPACING = max(0, int(os.environ.get("TITLE_LINE_SPACING", "4")))
