@@ -78,7 +78,7 @@ SHOW_SHARE_FOLLOW = os.environ.get("SHOW_SHARE_FOLLOW", "1").strip().lower() not
 }
 SHARE_ICON_PATH = os.environ.get("SHARE_ICON_PATH", "share_icon.png")
 FOLLOW_ICON_PATH = os.environ.get("FOLLOW_ICON_PATH", "follow_icon.png")
-SHARE_FOLLOW_ICON_SIZE = max(24, int(os.environ.get("SHARE_FOLLOW_ICON_SIZE", "54")))
+SHARE_FOLLOW_ICON_SIZE = max(24, int(os.environ.get("SHARE_FOLLOW_ICON_SIZE", "92")))
 SHARE_FOLLOW_FONT_SIZE = max(14, int(os.environ.get("SHARE_FOLLOW_FONT_SIZE", "22")))
 SHARE_FOLLOW_GAP = max(0, int(os.environ.get("SHARE_FOLLOW_GAP", "12")))
 SHARE_FOLLOW_GROUP_GAP = max(20, int(os.environ.get("SHARE_FOLLOW_GROUP_GAP", "76")))
