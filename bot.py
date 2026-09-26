@@ -58,18 +58,13 @@ CHANNEL_LOGO_OPACITY = max(0.0, min(1.0, float(os.environ.get("CHANNEL_LOGO_OPAC
 
 # The title is rendered below the logo. Noto Sans Telugu is preferred so Telugu
 # titles work; override this path if the deployment image uses another font.
-TITLE_FONT_PATH = os.environ.get(
-    "TITLE_FONT_PATH",
-    "/usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf",
-)
-TITLE_BOLD_LATIN_FONT_PATH = os.environ.get(
-    "TITLE_BOLD_LATIN_FONT_PATH",
-    "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
-)
-TITLE_BOLD_TELUGU_FONT_PATH = os.environ.get(
-    "TITLE_BOLD_TELUGU_FONT_PATH",
-    "/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf",
-)
+# Title fonts are fixed in code. Do NOT depend on Render environment variables.
+# Render's base image may not contain the Noto font files, so Latin titles use
+# the scalable DejaVu Sans Bold font that is available in the runtime image.
+# Telugu titles still try Noto Sans Telugu first, then fall back to DejaVu.
+TITLE_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+TITLE_BOLD_LATIN_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+TITLE_BOLD_TELUGU_FONT_PATH = "/usr/share/fonts/truetype/noto/NotoSansTelugu-Bold.ttf"
 TITLE_FONT_SIZE = 52  # Fixed in code; do not read from Render environment.
 TITLE_TEXT_MAX_WIDTH = max(200, int(os.environ.get("TITLE_TEXT_MAX_WIDTH", "640")))
 TITLE_TOP_GAP = max(0, int(os.environ.get("TITLE_TOP_GAP", "12")))
@@ -739,19 +734,42 @@ def _is_telugu_char(char):
 
 
 def _font_for_text_run(text, size):
-    """Choose a bold font for Telugu or Latin text."""
-    path = (
+    """Load a real scalable font; never fall back to Pillow's tiny bitmap font."""
+    is_telugu = any(_is_telugu_char(char) for char in text)
+    preferred = (
         TITLE_BOLD_TELUGU_FONT_PATH
-        if any(_is_telugu_char(char) for char in text)
+        if is_telugu
         else TITLE_BOLD_LATIN_FONT_PATH
     )
-    try:
-        return ImageFont.truetype(path, size)
-    except Exception:
+
+    candidates = [
+        preferred,
+        TITLE_FONT_PATH,
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+    ]
+
+    seen = set()
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
         try:
-            return ImageFont.truetype(TITLE_FONT_PATH, size)
-        except Exception:
-            return ImageFont.load_default()
+            if os.path.isfile(path):
+                font = ImageFont.truetype(path, int(size))
+                print(f"[TITLE FONT] size={int(size)} path={path}")
+                return font
+        except Exception as exc:
+            print(f"[TITLE FONT] failed path={path}: {exc}")
+
+    # Do not use ImageFont.load_default() here. It is a small bitmap font and
+    # ignores the requested 52px size, which was the reason the title appeared
+    # tiny on Render. Fail loudly instead if no scalable font exists.
+    raise RuntimeError(
+        "No scalable title font is available. Checked: " + ", ".join(candidates)
+    )
 
 
 def _text_run_width(text, size):
